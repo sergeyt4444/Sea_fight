@@ -1,5 +1,6 @@
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.reflect.TypeToken;
 
 import javax.swing.*;
 import java.awt.*;
@@ -8,10 +9,12 @@ import java.awt.event.ActionListener;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseListener;
 import java.io.*;
+import java.lang.reflect.Type;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.UnknownHostException;
+import java.util.ArrayList;
 
 public class Server extends JPanel {
 
@@ -59,7 +62,6 @@ public class Server extends JPanel {
         JFrame.add(button);
         JFrame.add(new Server());
         JFrame.setVisible(true);
-        opp_field.matrix[0][0] = 1;
         button.addActionListener(
                 new ActionListener() {
                     public void actionPerformed(ActionEvent e) {
@@ -69,8 +71,8 @@ public class Server extends JPanel {
                                 complete = 0;
                         }
                         if (complete == 1) {
-                            status.setText("Your turn");
-                            flag = 1;
+                            status.setText("Waiting");
+                            flag = 3;
                         }
                     }
                 }
@@ -197,6 +199,16 @@ public class Server extends JPanel {
                                 if (tmp == 0)
                                     tmp = 1;
                                 else tmp = 0;
+                                if (tmp == 1) {
+                                    if (col + tmp_len - 1 > 9) {
+                                        possible = 0;
+                                    }
+                                }
+                                else {
+                                    if (row + tmp_len - 1 > 9) {
+                                        possible = 0;
+                                    }
+                                }
                                 for (int i = 0; i < tmp_len; i++) {
                                     my_field.matrix[row + i * tmp][col + i * (1 - tmp)] = 0;
                                 }
@@ -235,7 +247,12 @@ public class Server extends JPanel {
                         if (opp_field.matrix[row][col] == 0 || opp_field.matrix[row][col] == 1) {
                             if (opp_field.matrix[row][col] == 1) {
                                 opp_field.matrix[row][col] = 3;
-                                //send
+                                try {
+                                    output.writeInt(row);
+                                    output.writeInt(col);
+                                } catch (IOException e1) {
+                                    e1.printStackTrace();
+                                }
 
                                 int hit_ship = -1;
                                 for (int i = 0; i < 10; i++) {
@@ -262,15 +279,15 @@ public class Server extends JPanel {
                                 int tmp = enemy_ships.ship_arr.get(hit_ship).is_horiz;
                                 int tmp_len = enemy_ships.ship_arr.get(hit_ship).len;
                                 for (int i = 0; i < tmp_len; i++)
-                                    if (opp_field.matrix[row + i * (1 - tmp)][col + i * tmp] != 3) {
+                                    if (opp_field.matrix[hit_row + i * (1 - tmp)][hit_col + i * tmp] != 3) {
                                         complete = 0;
                                         break;
                                     }
                                 if (complete == 1) {
                                     for (int i = -1; i <= tmp_len; i++) {
                                         for (int j = -1; j < 2; j++) {
-                                            int col_temp = col + i * tmp + j * (1 - tmp);
-                                            int row_temp = row + j * tmp + i * (1 - tmp);
+                                            int col_temp = hit_col + i * tmp + j * (1 - tmp);
+                                            int row_temp = hit_row + j * tmp + i * (1 - tmp);
                                             if (col_temp > -1 && row_temp > -1 && col_temp < 10 && row_temp < 10) {
                                                 if (opp_field.matrix[row_temp][col_temp] == 0) {
                                                     opp_field.matrix[row_temp][col_temp] = 2;
@@ -288,7 +305,12 @@ public class Server extends JPanel {
                             } else {
                                 opp_field.matrix[row][col] = 2;
                                 flag = 2;
-                                //send
+                                try {
+                                    output.writeInt(row);
+                                    output.writeInt(col);
+                                } catch (IOException e1) {
+                                    e1.printStackTrace();
+                                }
                                 status.setText("Opponents turn");
                             }
                         }
@@ -335,24 +357,81 @@ public class Server extends JPanel {
             sout = socket.getOutputStream();
             in = new DataInputStream(sin);
             out = new DataOutputStream(sout);
+            socket_listener server_listener = new socket_listener(socket,in,out, 1);
+            server_listener.start();
             if (out != null && in != null) {
                 input = in;
                 output = out;
             }
         } catch (IOException e) {
             e.printStackTrace();
-        }finally {
+        }
+        String sfield;
+        String sships;
+        System.out.println("almost Connected");
+        while (flag == 0) {
             try {
-                if (socket != null) {
-                    socket.close();
-                }
-                if (serverSocket != null) {
-                    serverSocket.close();
-                }
-            } catch (IOException e) {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
                 e.printStackTrace();
             }
         }
+        System.out.println("almost Connected");
+        try {
+            sfield = json.toJson(my_field);
+            sships = json.toJson(ships);
+            out.writeUTF(sfield);
+            out.writeUTF(sships);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        System.out.println("Connected");
+        int hit_x = -1;
+        int hit_y = -1;
+        while (hits < 20 && my_hits < 20) {
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            if (flag == 2) {
+                try {
+                    hit_x = in.readInt();
+                    hit_y = in.readInt();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+
+                if (my_field.matrix[hit_x][hit_y] == 0) {
+                    my_field.matrix[hit_x][hit_y] = 2;
+                    status.setText("Your turn");
+                    flag = 1;
+                } else {
+                    my_field.matrix[hit_x][hit_y] = 3;
+                    my_hits++;
+                    if (my_hits == 20) {
+                        flag = 3;
+                        status.setText("Defeat");
+                    }
+                }
+                JFrame.repaint();
+            }
+        }
+
+
+
+
+        try {
+            if (socket != null) {
+                socket.close();
+            }
+            if (serverSocket != null) {
+                serverSocket.close();
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
     }
 
 
